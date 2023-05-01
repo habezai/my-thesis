@@ -5,7 +5,7 @@
         margin: 1em 1em 0.5em 1.5em;    /*上右下左 边距*/
         font-size: 70%;                 /*字体大小控制*/
         line-height: 130%;               /*行高130%*/
-        background: #f0f0e5;            /*背景颜色为黄黄的*/
+        /*background: #f0f0e5;            /*背景颜色为黄黄的*/
     }
 
     h1{
@@ -36,7 +36,7 @@
         margin: 2em 4em 2em 4em;        /*上右下左 边距*/     
         font-size: 140%;                /*字体大小控制*/
         line-height: 130%;              /*行高130%*/
-        background: #f0f0e5;            /*背景颜色为黄黄的*/
+        /*background: #f0f0e5;            /*背景颜色为黄黄的*/
     }
 
     h1{
