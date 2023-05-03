@@ -80,7 +80,12 @@ ul {
 
 dt { font-weight: bold; }
 
-img { border: none; }  /*所有图像去掉边框*/
+img { 
+    max-width: 100%;
+    height: auto;
+    border: none; /*所有图像去掉边框*/
+
+}  
 
 pre {
     border-left: 5px solid #dcdcdc;
