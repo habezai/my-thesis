@@ -8,17 +8,23 @@
         background: #f0f0e5;            /*背景颜色为黄黄的*/
     }
 
-    h1{
+    h1 {
         font-weight: bold;             /*设置字体粗细的属性*/
         line-height: 150%;              /*行高110%*/
         margin-top: 0.5em;             /*标题的上边距*/
         margin-bottom: 0.0em;          /*标题的下边距*/
     }
-    h2, h3, h4, h5, h6 {
+    h2 {
         font-weight: bold;             /*设置字体粗细的属性*/
         line-height: 110%;              /*行高110%*/
         margin-top: 0.5em;             /*标题的上边距*/
-        margin-bottom: 0.0em;          /*标题的下边距*/
+        margin-bottom: 1.0em;          /*标题的下边距*/
+    }
+    h3,h4,h5 {
+        font-weight: bold;             /*设置字体粗细的属性*/
+        line-height: 100%;              /*行高110%*/
+        margin-top: 0.5em;             /*标题的上边距*/
+        margin-bottom: 1em;          /*标题的下边距*/
     }
 
     h1 {font-size: 1.4em; color: #000000;}
@@ -31,7 +37,7 @@
 
 @media (min-width: 769px) {
     /* 媒体查询，当屏幕宽度 ≥601 像素时，应用花括号里的样式 */
-    body {
+   body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;;
         margin: 2em 4em 2em 4em;        /*上右下左 边距*/     
         font-size: 140%;                /*字体大小控制*/
@@ -39,23 +45,29 @@
         background: #f0f0e5;            /*背景颜色为黄黄的*/
     }
 
-    h1{
+    h1 {
         font-weight: bold;              /*设置字体粗细的属性*/
         line-height:100%;               /*行高*/
         margin-top: 0.0em;              /*标题的上边距*/
-        margin-bottom: 1.2em;           /*标题的下边距*/
+        margin-bottom: 1.0em;           /*标题的下边距*/
     }
-    h2, h3, h4, h5, h6 {
+    h2 {
         font-weight: bold;              /*设置字体粗细的属性*/
         line-height:110%;               /*行高*/
-        margin-top: 1.0em;              /*标题的上边距*/
-        margin-bottom: 0.0em;           /*标题的下边距*/
+        margin-top: 0.0em;              /*标题的上边距*/
+        margin-bottom: 1.0em;           /*标题的下边距*/
+    }
+    h3,h4,h5 {
+        font-weight: bold;             /*设置字体粗细的属性*/
+        line-height: 100%;              /*行高110%*/
+        margin-top: 0.5em;             /*标题的上边距*/
+        margin-bottom: 1em;          /*标题的下边距*/
     }
 
     h1 {font-size: 1.6em; color: #000000;}
     h2 {font-size: 1.3em; color: #404040;}
-    h3 {font-size: 1.2em; color: #707070;}
-    h4 {font-size: 1.1em; color: #909090;}
+    h3 {font-size: 1.1em; color: #707070;}
+    h4 {font-size: 1.0em; color: #909090;}
     h5 {font-size: 1.0em; color: #989898;}
     h6 {font-size: 1em; color: #9c9c9c;}
 }
