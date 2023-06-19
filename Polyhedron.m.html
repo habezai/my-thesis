@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html>
+<head>
+<link rel="Stylesheet" type="text/css" href="style.css">
+<link rel="alternate" type="application/rss+xml" title="RSS" href="rss.xml">
+<title>Polyhedron.m</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+
+<pre matlab>
+classdef Polyhedron &lt; handle
+    %POLYGON Summary of this class goes here
+    %   Detailed explanation goes here
+    
+    properties
+        % vertices(:,i): 第i号顶点的坐标
+        vertices
+f
+        % faces{f}: 面f的顶点编号们 (行向量或列向量), 不闭合
+        faces
+        
+        % 柏拉图固体是 D I O C T这样的名字。(经过康威操作，会加上操作符作为前缀)
+        name
+        
+    end
+    
+    methods
+        function o = Polyhedron(verts, faces,name)
+            %如果没有输入参数，就构造空白对象。如果输入了V、F，就以参数构造。
+            %比如被 p = Polyhedron.Dodecahedron;调用
+            if nargin == 0
+                o.vertices = [];
+                o.faces = {};
+            else 
+                o.vertices = verts;
+                o.faces = faces;
+                if nargin == 3
+                    o.name = name;
+                end
+            end
+        end
+
+        function p = clone(o)
+            p = Polyhedron(o.vertices, o.faces);
+            p.name = o.name;
+        end
+
+        % 边的名称列表, 'u-v', 其中u&lt;v.
+        % @param[out] E  [2,*], E(:,e)为列向量[i;j], 边e的顶点编号, 且i&lt;j
+        function E = edges(o)
+            nfaces = numel(o.faces);
+            emap = containers.Map();
+            for f = 1 : nfaces
+                vvec = o.faces{f}; % 顶点编号序列, vertices vector
+                nverts = numel(vvec);
+                i = vvec(end);
+                for u = 1 : nverts
+                    j = vvec(u);
+                    if i &gt; j
+                        [i,j] = mxsplit([j,i], 1); % 交换i,j
+                    end
+                    eid = sprintf('%d-%d', i, j);
+                    if ~emap.isKey(eid)
+                        emap(eid) = [i;j];
+                    end
+                end
+            end
+            E = cell2mat(emap.values);
+        end
+
+        % 面的中心
+        % @param[out] C  [3,*], 各面的中心
+        function C = centers(o)
+            nfaces = numel(o.faces);
+            C = zeros(3, nfaces);
+            for f = 1 : nfaces
+                vvec = o.faces{f};       %这里是存着一组顶点编号。
+                V = o.vertices(:, vvec); %这取出这些顶点的坐标。
+                C(:,f) = mean(V, 2); %C的每列，是对应面的中心。  mean(V, 2)的结果是一列，列中的每个元素是对应行的均值。
+            end
+        end
+
+        % 面的归一化法向量(指向多面体内部)
+        % @param[out] N  [3,*], 各面的法向量(指向多面体内部)
+        function N = normals(o)
+            nfaces = numel(o.faces);
+            N = zeros(3, nfaces);
+            % 多面体的中心c
+            c = mean(o.vertices, 2);
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                V = o.vertices(:, vvec);
+                % 面的中心m
+                m = mean(V, 2);
+                % 面的中心m平移到原点O
+                V = V - m;
+                % (m,c)指向多面体内部
+                mc = c - m;
+                % OAB在面上
+                AB = V(:,1:2);
+                % 减去(m,c)在面上的投影得到法向量
+                n = mc - prj3p(mc, AB);
+                N(:,f) = n;
+            end
+            % 归一化
+            N = N ./ vecnorm(N);
+        end
+
+        % 面的顶点排序。
+        function sortVertices(o)
+            % 每个面的顶点进行排序。幅角从小到大（也就是逆时针）排序。改动的是o.faces的每一个cell（调顺序）。
+            nfaces = numel(o.faces);
+            % 多面体的中心c   是所有顶点的(meanx,meany,meanz)'。 3×1 double。
+            c = mean(o.vertices, 2);
+            for f = 1 : nfaces
+                vvec = o.faces{f}; %取出某一个面的 顶点编号们。
+                V = o.vertices(:, vvec); %利用vvec取出当前这个面的 各点的坐标们。
+                % 当前面的中心m
+                m = mean(V, 2);
+                % 面的中心m平移到原点O， 目的是：让后面可以简单的OAB就可以表示这个面。
+                V = V - m;
+                % (m,c)指向多面体内部中心。获得向量, mc向量是 面心m 指向 几何中心c的向量。
+                mc = c - m;
+                % OAB在面上, 取出这个移动以后的面的 前两个点，A点坐标，B点坐标，把OA，OB向量放一起，就可以 表达这个平面。
+                AB = V(:,1:2);
+                % 面的法向量: mc 减去(m,c)在面OAB上的投影
+                n = mc - prj3p(mc, AB);  %虽然移动了，但是mc向量 也是从新m到新c的向量。
+                % 法向量n旋转到Z轴的旋转变换矩阵R, 再乘以整个面的所有顶点V，即可把面旋转到XOY平面
+                V = rotg3vz(n) * V;
+                [X,Y,~] = mxsplit(V,2); % X = V(1,:); Y = V(2,:); 只取出V的前两行，赋给X和Y。各顶点x坐标序列，各顶点y坐标序列。
+                % 各顶点在XOY平面的幅度角(弧度)
+                A = atan2(Y,X);
+                % 依幅度角排序，排序后的索引存入I数组
+                [~,I] = sort(A);
+                vvec = vvec(I);  %将vvec的顺序重排，从小到大。
+                o.faces{f} = vvec; %vvec的值，一个一个更新faces，排序依据幅角从小到大（也就是逆时针）。
+            end
+        end
+
+        % 判断各面的顶点是否都已排序
+        function isSorted(o)
+            nfaces = numel(o.faces);
+            % 多面体的中心c
+            c = mean(o.vertices, 2);
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                V = o.vertices(:, vvec);
+                % 面的中心m
+                m = mean(V, 2);
+                % 面的中心m平移到原点O
+                V = V - m;
+                % (m,c)指向多面体内部
+                mc = c - m;
+                % OAB在面上
+                AB = V(:,1:2);
+                % 面的法向量: 减去(m,c)在面上的投影
+                n = mc - prj3p(mc, AB);
+                % 法向量n旋转到Z轴, 即面旋转到XY平面
+                V = rotg3vz(n) * V;
+                [X,Y,~] = mxsplit(V,2); % X = V(1,:); Y = V(2,:);
+                % 各顶点在XY平面的幅度角
+                A = atan2d(Y,X);
+                % 判断幅度角是否单调递增
+                nverts = numel(A);
+                a = A(end);
+                for u = 1 : nverts
+                    b = A(u);
+                    if a &gt; 0 &amp;&amp; b &lt; 0
+                    else
+                        assert(a &lt; b);
+                    end
+                    a = b;
+                end
+            end
+        end
+    end
+    
+    %% Conway Operators 康威算子
+    methods
+        % Kis (abbreviated from triakis) transforms an N-sided face into an
+        % N-pyramid rooted at the same base vertices.
+        % 将n-边的面变换为金字塔: 面的中心点与各条边分别围为1个三角形.
+        % @param[in]  nedges 只操作n条边的面; 若n==0, 则操作所有面.
+        % @param[in]  height 各面的中心相对抬升高度
+        % @param[out] p      Polyhedron
+        function p = kis(o, nedges, height)
+            % 将n-边的面变换为金字塔: 面的中心点与各条边分别围为1个三角形. 那么 V' = V + F , F' = 2E, E' = V'+F'- 2 = 3E ,
+            % V' = dot([1 0 1],[V E F]')    E' = dot([0 3 0],[V E F]')    F' = dot([0 2 0],[V E F]')
+            if nargin &lt; 2
+                nedges = 0;
+            end
+            if nargin &lt; 3
+                height = [];
+            end
+            % 新建多面体
+            pf = PolyFlag;
+            nverts = size(o.vertices, 2);
+            % 原顶点也是新顶点
+            for i = 1 : nverts
+                vertName = sprintf('v%d', i);
+                xyz = o.vertices(:,i);
+                pf.newVertice(vertName, xyz);
+            end
+            C = o.centers(); % 面的中心点, 抬升height高度
+            if isempty(height)
+                height = mean(vecnorm(o.vertices)) / mean(vecnorm(C)) - 1;
+            end
+            C = C .* (1 + height); % 抬升height高度
+            nfaces = numel(o.faces);
+            for f = 1 : nfaces
+                % 面的顶点列表
+                vvec = o.faces{f};
+                vid1 = sprintf('v%d', vvec(end));
+                % 面的顶点数
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    vid2 = sprintf('v%d', vvec(u));
+                    if (nedges == nverts) || (nedges == 0)
+                        apex = sprintf('apex%d', f);
+                        fid = sprintf('f%d-%s', f, vid1);
+                        % 新顶点: 面的中心点沿法向量抬高到单位球面上
+                        c = C(:,f);
+                        pf.newVertice(apex, c);
+                        % 新面
+                        pf.newFlag(fid, vid1, vid2);
+                        pf.newFlag(fid, vid2, apex);
+                        pf.newFlag(fid, apex, vid1);
+                    else
+                        % 保持原面
+                        fid = sprintf('f%d', f);
+                        pf.newFlag(fid, vid1, vid2);
+                    end
+                    vid1 = vid2;
+                end
+            end
+            p = pf.toPolyhedron();
+            p.name = ['k' o.name];
+        end
+
+        % Ambo
+        % ------------------------------------------------------------------------------------------
+        % The best way to think of the ambo operator is as a topological "tween" between a polyhedron
+        % and its dual polyhedron.  Thus the ambo of a dual polyhedron is the same as the ambo of the
+        % original. Also called "Rectify".
+        % 以各边中点为顶点.
+        % 原来的面, 其各条边的中点围成一个新的面.
+        % 与原顶点相关的所有边的中点, 围绕该顶点构成一个新的面.(原顶点被削去)
+        % https://levskaya.github.io/polyhedronisme/?recipe=aC
+        % @param[out] p  Polyhedron
+        function p = ambo(o)
+            %原来的面, 其各条边的中点围成一个新的面(F'=F+V)，以各边中点为顶点(V'=E)，原顶点被削去，。 V' = E, E' = 2E+2 , F' = F + V
+            pf = PolyFlag();
+            nfaces = numel(o.faces);
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end-1);
+                j = vvec(end);
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    k = vvec(u);
+                    % 每条边只操作一次
+                    if i &lt; j
+                        % 顶点i和j的坐标
+                        ab = o.vertices(:, [i,j]);
+                        % 顶点i和j的中点m
+                        % m在原来的面上, 不抬高到单位球面上
+                        % 面的各边中点围成的面, 依然在同一个面上
+                        m = mean(ab, 2);
+                        vertName = o.midName(i,j);
+                        pf.newVertice(vertName, m);
+                    end
+                    % 在原来的面上: 相邻边的中点围成的面
+                    fid = sprintf('orig%d', f);
+                    vid1 = o.midName(i,j);
+                    vid2 = o.midName(j,k);
+                    pf.newFlag(fid, vid1, vid2); % 保持顶点顺序
+                    % 与原顶点j相关的所有边的中点, 围成一个新的面
+                    fid = sprintf('dual-v%d', j);
+                    pf.newFlag(fid, vid2, vid1); % 保持顶点顺序
+                    % 下一轮
+                    i = j;
+                    j = k;
+                end
+            end
+            p = pf.toPolyhedron();
+            p.name = ['a' o.name];
+        end
+
+        % Gyro
+        % ----------------------------------------------------------------------------------------------
+        % This is the dual operator to "snub", i.e dual*Gyro = Snub.  It is a bit easier to implement
+        % this way.
+        % 
+        % Snub creates at each vertex a new face, expands and twists it, and adds two new triangles to
+        % replace each edge.
+        function p = gyro(o)
+            pf = PolyFlag();
+            nverts = size(o.vertices, 2);
+            % 原顶点也是新顶点
+            for i = 1 : nverts
+                vid_i = sprintf('v%d', i);
+                xyz = o.vertices(:,i);
+                pf.newVertice(vid_i, xyz);
+            end
+            % 原始多面体的 各面中心点作为一个顶点录入。
+            C = o.centers();
+            nfaces = numel(o.faces);
+            for f = 1 : nfaces
+                c = C(:,f);
+                vid_f = sprintf('c%d', f); % 面f的中心点 命名且录入
+                pf.newVertice(vid_f, c);
+            end
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end-1);  %当前的面中 倒数第二个点
+                j = vvec(end);    %当前的面中 倒数第一个点
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    k = vvec(u);
+                    % 有向边(i,j)的1/3处对应一个新的顶点Vm
+                    Vi = o.vertices(:,i);
+                    Vj = o.vertices(:,j);
+                    Vm = o.oneThird(Vi, Vj); % 计算且实际添加的点，只有这个1/3点Vm
+                    vid_ij = sprintf('v%d~v%d', i, j);
+                    pf.newVertice(vid_ij, Vm);  %录入1/3点
+                    %
+                    fid = sprintf('f%d-v%d', f, i);
+                    vid_f = sprintf('c%d', f);                                            % 面f的中心点 
+                    pf.newFlag(fid, vid_f, vid_ij);                                       % 链接 面心-&gt; 1/3点
+                    vid_ji = sprintf('v%d~v%d', j, i); % 有向边(i,j)的2/3点(当前未计算)
+                    pf.newFlag(fid, vid_ij, vid_ji);                                      % 链接 1/3点 -&gt; 2/3点
+                    vid_j = sprintf('v%d', j);
+                    pf.newFlag(fid, vid_ji, vid_j);                                       % 链接 2/3点 -&gt; j点
+                    vid_jk = sprintf('v%d~v%d', j, k); % 有向边(j,k)的1/3点
+                    pf.newFlag(fid, vid_j, vid_jk);                                       % 链接 j点 -&gt; k出发的新1/3点
+                    pf.newFlag(fid, vid_jk, vid_f);                                       % 链接 k出发的新1/3点 -&gt; 面心 
+                    % 下一轮
+                    i = j; %i后移(mod nfaces)
+                    j = k; %j后移(mod nfaces)
+                end
+            end
+            p = pf.toPolyhedron();
+            p.name = ['g' o.name];
+        end
+
+        % Propellor
+        % ------------------------------------------------------------------------------------------
+        % builds a new 'skew face' by making new points along edges, 1/3rd the distance from v1-&gt;v2,
+        % then connecting these into a new inset face.  This breaks rotational symmetry about the
+        % faces, whirling them into gyres
+        % 
+        function p = propellor(o)
+            pf = PolyFlag();
+            nverts = size(o.vertices, 2);
+            % 原顶点也是新顶点
+            for i = 1 : nverts
+                vid_i = sprintf('v%d', i);
+                xyz = o.vertices(:,i);
+                pf.newVertice(vid_i, xyz);
+            end
+            nfaces = numel(o.faces);
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end-1);
+                j = vvec(end);
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    k = vvec(u);
+                    % 有向边(i,j)的1/3点对应一个新的顶点
+                    Vi = o.vertices(:,i);
+                    Vj = o.vertices(:,j);
+                    Vm = o.oneThird(Vi, Vj);
+                    vid_ij = sprintf('v%d~v%d', i, j);
+                    pf.newVertice(vid_ij, Vm);
+                    % 原面的各有向边的1/3点, 围成一个新的面
+                    fid = sprintf('f%d', f);
+                    vid_jk = sprintf('v%d~v%d', j, k);
+                    pf.newFlag(fid, vid_ij, vid_jk);
+                    % 边(i,j)的1/3点, 边(j,i)的1/3点, 顶点j, 边(j,k)的1/3点,
+                    % 围顶点j构成一个新的面
+                    fid = sprintf('f%d-v%d', f, j);
+                    vid_ji = sprintf('v%d~v%d', j, i); % 有向边(i,j)的2/3点
+                    pf.newFlag(fid, vid_ij, vid_ji);
+                    vid_j = sprintf('v%d', j);
+                    pf.newFlag(fid, vid_ji, vid_j);
+                    vid_jk = sprintf('v%d~v%d', j, k); % 有向边(j,k)的1/3点
+                    pf.newFlag(fid, vid_j, vid_jk);
+                    pf.newFlag(fid, vid_jk, vid_ij);
+                    % 下一轮
+                    i = j;
+                    j = k;
+                end
+            end
+            p = pf.toPolyhedron();
+            p.name = ['p' o.name];
+        end
+
+        % Dual
+        % ------------------------------------------------------------------------------------------------
+        % The dual of a polyhedron is another mesh wherein:
+        % - every face in the original becomes a vertex in the dual
+        % - every vertex in the original becomes a face in the dual
+        % 
+        % So N_faces, N_vertices = N_dualfaces, N_dualvertices
+        % 
+        % The new vertex coordinates are convenient to set to the original face centroids.
+		% 新的顶点坐标方便设置为原来的人脸质心。
+        % 对偶.
+        % 每个面的中心对应一个新顶点.
+        % 与一个顶点相关的各面的中心, 围绕该顶点构成一个新的面.
+        function p = dual(o)
+            pf = PolyFlag();
+            nfaces = numel(o.faces);
+            C = o.centers();
+            % 每个面对应一个新顶点
+            for f = 1 : nfaces
+                vertName = sprintf('v%d', f);
+                c = C(:,f);
+                pf.newVertice(vertName, c); % 面f对应的顶点
+            end
+            % 建立边与面的映射
+            emap = containers.Map();
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end);   % 最后一个点
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    j = vvec(u);
+                    eid = sprintf('%d-%d', i, j);  % i和j是逆时针顺序的。
+                    emap(eid) = f;  %依据 有向边的名称，就能查找到在哪一个面。  有向边&lt;i,j&gt;所在的面的编号为f
+                    %可以利用每条有向边（逆时针）属于两个相邻面的特性。
+                    % 下一轮
+                    i = j;
+                end
+            end
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end);
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    j = vvec(u);
+                    % 每个顶点对应一个新的面
+                    fid = sprintf('f%d', i); % 顶点i对应的面
+                    
+                    eid1 = sprintf('%d-%d', i, j);
+                    f1 = emap(eid1); % &lt;i,j&gt;所在的面f1
+                    vid1 = sprintf('v%d', f1);
+                    
+                    eid2 = sprintf('%d-%d', j, i);
+                    f2 = emap(eid2); % &lt;j,i&gt;所在的面f2
+                    vid2 = sprintf('v%d', f2);
+                    
+                    %利用了，每条有向边（逆时针）属于两个相邻面的特性。（ij和ji并不在同一个面）
+                    pf.newFlag(fid, vid1, vid2); % 顶点可能乱序
+                    % 下一轮
+                    i = j;
+                end
+            end
+            pf.sortVerts();
+            p = pf.toPolyhedron();
+            p.name = ['d' o.name];
+        end
+
+        % Chamfer
+        % ----------------------------------------------------------------------------------------
+        % A truncation along a polyhedron's edges.
+        % Chamfering or edge-truncation is similar to expansion, moving faces apart and outward,
+        % but also maintains the original vertices. Adds a new hexagonal face in place of each
+        % original edge.
+        % A polyhedron with e edges will have a chamfered form containing 2e new vertices,
+        % 3e new edges, and e new hexagonal faces. -- Wikipedia
+        % See also http://dmccooey.com/polyhedra/Chamfer.html
+        %
+        % The thick parameter could control how deeply to chamfer.
+        % 切边.
+        function p = chamfer(o, thick)
+            %对于多面体S,每条边变成六边形。中间利用了PolyFlag进行拓扑变换。最后得到Polyhedron对象，名字为'cS'
+            % V += 2E， E += 3E , F += E, 。 比如（正十二面体D的V-E-F是20-30-12，而cD的V-E-F就是80-120-42）
+            % V' = dot([1 2 0],[V E F]')    E' = dot([0 4 0],[V E F]')    F' = dot([0 1 1],[V E F]')
+            if nargin &lt; 2
+                thick = 0.5;  %这个thick是向面心靠拢的程度。
+            end
+            pf = PolyFlag();
+            C = o.centers();%中心点，每一个列代表一个面的中心点。C(:,f)。
+            nverts = size(o.vertices, 2);
+            for i = 1 : nverts
+                vertName = sprintf('v%d', i); %为每一个顶点起名字vi，存入PolyFlag对象
+                % 原顶点j对应一个新的顶点, 暂不向内缩进
+                xyz = o.vertices(:,i);
+                pf.newVertice(vertName, xyz); %把每一个原始顶点，用于初始化PolyFlag对象
+                %以 顶点名字---&gt; (x坐标;y坐标;z坐标) 的映射形式，存入 pf.vertices
+            end
+            nfaces = numel(o.faces);
+            for f = 1 : nfaces
+                vvec = o.faces{f}; %vvec是一个数组，代表第f个面的 全部顶点编号。
+                i = vvec(end); %第f个面的，最后一个顶点的的顶点编号。
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    j = vvec(u);                %从前往后，遍历顶点编号j。
+                    vid_j = sprintf('v%d', j);  %记录顶点名字 ‘顶点j’
+                    
+                    % 原顶点j沿着面f的法向量向外抬升, 对应产生 一个新的顶点vid_fj
+                    vid_fj = sprintf('f%d-v%d', f, j); %记录一下  ‘面f-顶点j’这样一个名字（由面f上提升出来的新增点j）
+                    c = C(:,f); %第f个面的中心点。
+                    xyz = o.vertices(:,j);%此f面的 顶点j的坐标。
+                    xyz = xyz + (c - xyz) * thick;  %c-xyz是一个 顶点j指向 面心c的向量。 这句话的目的是，让顶点j往面心c走一半（若是0.5）路程。
+                    pf.newVertice(vid_fj, xyz);  %把新增的顶点 vid_fj 存入PolyFlag对象。
+                    
+                    fid_f = sprintf('f%d', f);  %记录‘面f’这个名字
+                    
+                    vid_fi = sprintf('f%d-v%d', f, i); %记录‘面f-顶点i’这个名字（由面f上提升出来的新增点i）
+                    pf.newFlag(fid_f, vid_fi, vid_fj); %添加三元组：{‘面f’，‘面f-顶点i’，‘面f-顶点j’}
+                    
+                    %   原边(i,j)对应变成一个6边形
+                    %   原顶点i,j沿相邻面的法向量向外抬升, 2个相邻面, 4个新顶点
+                    %   原顶点i,j向外扩展, 2个新顶点
+                    if i &lt; j
+                        fid_ij = sprintf('hex%d-%d', i, j); %记录‘六边形i-j’ 或者 ‘六边形j-i’ 这个名字
+                    else
+                        fid_ij = sprintf('hex%d-%d', j, i);
+                    end  %假设i比j小，那么就是‘六边形i-j’。总之，这样的话，就保证了ij 或 ji遇上的时候，只写成一种六边形faceName。
+                    vid_i = sprintf('v%d', i);         %记录‘顶点i’这个名字
+                    pf.newFlag(fid_ij, vid_j, vid_fj); %这时的三元组：{‘六边形ij’，‘顶点j’，‘面f-顶点j’}
+                    pf.newFlag(fid_ij, vid_fj, vid_fi);%这时的三元组：{‘六边形ij’，‘面f-顶点j’，‘面f-顶点i’}
+                    pf.newFlag(fid_ij, vid_fi, vid_i); %这时的三元组：{‘六边形ij’，‘面f-顶点i’，‘顶点i’}
+                    %经过这么一搞，就连了上3边。注意：此时‘面f-顶点i’是未计算完成的。
+                    % 下一轮
+                    %比如第一轮，是处理第一个面，vvec是[18,6,9,1,17]，那么 i 就是 17， j 就是 18。
+                    i = j;  %这样迭代 比较巧妙的是， i-j数对会这样遍历：17-18、18-6、6-9、9-1、1-17
+                    %而每次形成的六边形名字就会是：‘hex17-18’，‘hex6-18’，‘hex6-9’，‘hex1-9’，‘hex1-17’
+                end
+            end
+            
+            % 各条原边 对应的六边形面 进行平面化:  原顶点向内部缩进???  不然的话，看起来像翻折了的六边形。
+            nverts = size(o.vertices, 2);
+            Vnp = cell([1, nverts]); % 为各顶点记录: 与之相关的面数量, 坐标累积
+            for i = 1 : nverts
+                np = { 0, [0;0;0] };
+                Vnp{i} = np;  %比如这里，Vnp{i}记录了{ 与'顶点i'关联的其他点个数, 关联的所有点的坐标求和 }
+            end
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end);
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    j = vvec(u);
+                    % 面边对应的面的ID: fid_ij
+                    if i &lt; j
+                        fid_ij = sprintf('hex%d-%d', i, j);
+                    else
+                        fid_ij = sprintf('hex%d-%d', j, i);
+                    end
+                    vmap = pf.flags(fid_ij);
+                    % 面fid_ij上的3个顶点: i, a, b
+                    vid_i = sprintf('v%d', i);
+                    vid_a = vmap(vid_i); %取出 当前‘六边形ij’的 ‘顶点i’的 下一个顶点名字，存进vid_a变量
+                    vid_b = vmap(vid_a); %取出 当前‘六边形ij’的   vid_a的 下一个顶点名字，存进vid_b变量
+                    % 面fid_ij上的3个顶点: j, c, d
+                    vid_j = sprintf('v%d', j);
+                    vid_c = vmap(vid_j);  %取出 当前‘六边形ij’的 ‘顶点j’的 下一个顶点名字，存进vid_j变量
+                    vid_d = vmap(vid_c);  %取出 当前‘六边形ij’的  vid_c的 下一个顶点名字，存进vid_d变量
+                    % a,b,c,d的坐标
+                    A = pf.vertices(vid_a); %‘顶点i’的 下一个顶点坐标
+                    B = pf.vertices(vid_b); %‘顶点i’的 下下个顶点坐标
+                    C = pf.vertices(vid_c); %‘顶点j’的 下一个顶点坐标
+                    D = pf.vertices(vid_d); %‘顶点j’的 下下个顶点坐标
+                    % ab与cd一定是平行的, 平行于原边ij
+                    assert(vecnorm(cross(A-B, C-D)) &lt; 1e-6);
+                    
+                    % 原顶点i
+                    I = o.vertices(:,i);
+                    % 平面化: 顶点i应移到动向量i与面fid_ij的交点  ★ ★ ★
+                    %         顶点i在多个面上, 先累积交点坐标, 再求平均交点
+                    xyz = inter3lp(I, [A B C]); %求出线与面的交点。线是OI, 面是ABC三点组成的平面。
+                    np = Vnp{i};
+                    np{1} = np{1} + 1;   % 数量+1
+                    np{2} = np{2} + xyz; % 坐标累积
+                    Vnp{i} = np;%比如这里，Vnp{i}记录了{ 与'顶点i'关联的其他点个数, 关联的所有点的坐标求和 }
+                    % 原顶点j
+                    J = o.vertices(:,j);
+                    % 平面化: 顶点j应移到动向量j与面fid_ij的交点
+                    %        顶点j在多个面上, 先累积交点坐标, 再求平均交点
+                    xyz = inter3lp(J, [A B C]);%求出线与面的交点。线是OJ, 面是ABC三点组成的平面。
+                    np = Vnp{j};
+                    np{1} = np{1} + 1;   % 数量+1
+                    np{2} = np{2} + xyz; % 坐标累积
+                    Vnp{j} = np;%比如这里，Vnp{j}记录了{ 与'顶点j'关联的其他点个数, 关联的所有点的坐标求和 }
+                    % 下一轮
+                    i = j;
+                end
+            end
+            % 求交点的平均交点
+            nverts = size(o.vertices, 2);
+            for i = 1 : nverts
+                np = Vnp{i};
+                np{2} = np{2} / np{1}; % 坐标平均。 之所以要最后求平均，就是因为，每个顶点，不只是与一个节点连接的，有多个。要不偏不倚。
+                vertName = sprintf('v%d', i);   %起名 '顶点i'
+                pf.vertices(vertName) = np{2};  %修改顶点坐标位置。
+            end
+            p = pf.toPolyhedron(); %由PolyFlag 构建出 Polyhedron对象。
+            p.name = ['c' o.name];
+        end
+
+        % Whirl
+        % ----------------------------------------------------------------------------------------------
+        % Gyro followed by truncation of vertices centered on original faces.
+        % This create 2 new hexagons for every original edge.
+        % (https://en.wikipedia.org/wiki/Conway_polyhedron_notation#Operations_on_polyhedra)
+        %
+        % Possible extension: take a parameter n that means only whirl n-sided faces.
+        % If we do that, the flags marked #* below will need to have their other sides
+        % filled in one way or another, depending on whether the adjacent face is
+        % whirled or not.
+        function p = whirl(o)
+            pf = PolyFlag();
+            nverts = size(o.vertices, 2);
+            % 每个原顶点对应一个新的顶点
+            for u = 1 : nverts
+                vid_ij = sprintf('v%d', u);
+                xyz = o.vertices(:,u);
+                pf.newVertice(vid_ij, xyz); %把每个原始点录入。
+            end
+            nfaces = numel(o.faces);
+            % 绕每个面的中心, 添加顶点
+            C = o.centers();
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end-1); %当前面f的倒数第二个顶点的顶点编号
+                j = vvec(end);   %当前面f的倒数第一个顶点的顶点编号
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    k = vvec(u); %k当前的面f的第u个顶点的顶点编号
+                    % 每条有向边1/3位置, 增加1个新的顶点
+                    Vi = o.vertices(:,i);
+                    Vj = o.vertices(:,j);
+                    % 有向边(i,j)的1/3处对应一个新的顶点Vm
+                    Vm = o.oneThird(Vi, Vj); %计算且实际添加的点，这是一个1/3点Vm
+
+                    vid_ij = sprintf('%d~%d', i, j);
+                    % Vm不在单位球面上, 暂时保持在面原来的面上
+                    pf.newVertice(vid_ij, Vm); % 带名录入1/3顶点
+                    % 2/3点
+                    vid_ji = sprintf('%d~%d', j, i);
+
+                    % 面中心点到ij的1/3位置的1/3位置, 增加1个新的顶点
+                    vid_ci = sprintf('c%d~v%d', f, i);
+                    % 面中心点到jk的1/3位置的1/3位置, 增加1个新的顶点
+                    vid_cj = sprintf('c%d~v%d', f, j);
+                    c = C(:,f);
+                    Vt = o.oneThird(c, Vm);  %计算且实际添加的点，这也是一个
+                    pf.newVertice(vid_ci, Vt);                                 % 计算出悬空点X1
+
+                    % 围成新的面
+                    fid = sprintf('f%d-v%d', f, i);
+                    pf.newFlag(fid, vid_ci, vid_ij);                           % 链接悬空点X1 和 1/3点
+                    % (vid_ij,vid_ji)占原边(i,j)的中间1/3                   
+                    pf.newFlag(fid, vid_ij, vid_ji);                           % 链接 1/3点 和 2/3点
+                    % vid_ij, vid_ji与vid_j在单位球面上, 不在一条直线上
+                    vid_j = sprintf('v%d', j);
+                    pf.newFlag(fid, vid_ji, vid_j)                             % 链接 2/3点 和 j 点
+                    vid_jk = sprintf('%d~%d', j, k);
+                    pf.newFlag(fid, vid_j, vid_jk)                             % 链接 j点 和 j出发的新1/3点 
+                    pf.newFlag(fid, vid_jk, vid_cj);                           % 链接 j出发的新1/3点 和 新的悬空点X2(离j近的)
+                    pf.newFlag(fid, vid_cj, vid_ci);                           % 链接 新的悬空点X2(离j近的) 和 悬空点
+                    % 围面的中心点, 形成新的面
+                    fid = sprintf('c%d', f);
+                    pf.newFlag(fid, vid_ci, vid_cj);                           % (这行好像多余了)
+                    % 下一轮
+                    i = j;
+                    j = k;
+                end
+            end
+            p = pf.toPolyhedron();
+            p.name = ['w' o.name];
+        end
+
+        function p = zip(o)
+            p = o.kis.dual;
+            p.name = ['z' o.name];
+        end
+
+        function p = expand(o)
+            p = o.ambo.ambo;
+            p.name = ['x' o.name];
+        end
+
+        function p = bevel(o)
+            p = o.ambo.dual.kis.dual;
+            p.name = ['b' o.name];
+        end
+
+        function p = snub(o)
+            %sX = dgX
+            p = o.gyro.dual;
+            p.name = ['s' o.name];
+        end
+
+        function p = join(o)
+            %jX = daX
+            p = o.ambo.dual;
+            p.name = ['j' o.name];
+        end
+        
+        function p = needle(o)
+            p = o.dual.kis;
+            p.name = ['n' o.name];
+        end
+        
+        function p = ortho(o)
+            p = o.ambo.ambo.dual;
+            p.name = ['o' o.name];
+        end
+
+        function p = meta(o)
+            p = o.ambo.dual.kis;
+            p.name = ['m' o.name];
+        end
+
+        function p = truncate(o)
+            p = o.dual.kis.dual;
+            p.name = ['t' o.name];
+        end
+        
+%         function p = subdivide(o)
+%             % 细分，无参数版的 u 操作，u表示u2，uu表示u4，uuu表示u8。
+%             % uX = dcdX
+%             p = o.dual.chamfer.dual; 
+%             p.name = ['u' o.name];
+%         end
+        function p = subdivide(o)
+            % 细分三角形面
+            % 录入原多面体
+            pf = PolyFlag();
+            nfaces = numel(o.faces);
+            C = zeros(3, nfaces);  %C 存储每一个面的面心
+            for f_idx = 1 : nfaces
+                vvec = o.faces{f_idx};       %这里是存着一组顶点编号。
+                V = o.vertices(:, vvec); %取出面上各个顶点的坐标，按列排好。
+                C(:,f_idx) = mean(V, 2);     %C的每列，是对应面的中心。  mean(V, 2)的结果是一列，列中的每个元素是对应行的均值。
+            end
+            %C 每一个列代表一个面的中心点。C(:,f)。
+            nverts = size(o.vertices, 2);
+            for i = 1 : nverts
+                vertName = sprintf('v%d', i); %为每一个顶点起名字vi，存入PolyFlag对象
+                xyz = o.vertices(:,i);
+                pf.newVertice(vertName, xyz); %把每一个原始顶点，用于初始化PolyFlag对象
+                %以 顶点名字---&gt; (x坐标;y坐标;z坐标) 的映射形式，存入 pf.vertices
+            end
+            nfaces = numel(o.faces);
+%             for f = 1 : nfaces 
+%                 f_name = sprintf('f_%d',f);
+%                 vvec = o.faces{f}; %vvec是一个数组，代表第f个面的 全部顶点编号。
+%                 i = vvec(end); %第f个面的，最后一个顶点的的顶点编号。
+%                 %nverts = numel(vvec);  %既然是三角形面，那就是3个顶点。
+%                 j = vvec(1); k = vvec(2);
+%                 viName = sprintf('v%d', i);   %记录顶点名字 ‘顶点j’
+%                 vjName = sprintf('v%d', j);    vkName = sprintf('v%d', k); 
+%                 
+%                 pf.newFlag(f_name, viName,vjName);
+%                 pf.newFlag(f_name, vjName,vkName);
+%                 pf.newFlag(f_name, vkName,viName);
+%             end
+
+            for f_idx = 1 : nfaces 
+                vvec = o.faces{f_idx}; %vvec是一个数组，代表第f个面的 全部顶点编号。
+                i = vvec(end); %第f个面的，最后一个顶点的的顶点编号。
+                %nverts = numel(vvec);  %既然是三角形面，那就是3个顶点。
+                j = vvec(1); k = vvec(2);
+                viName = sprintf('v%d', i);   %记录顶点名字 ‘顶点j’
+                vjName = sprintf('v%d', j);    vkName = sprintf('v%d', k); 
+                
+                
+                %ij的中点，取名 mid-vi-vj  (i&lt;j)
+                if i&lt;j
+                    mid_vi_vjName = sprintf('mid-v%d-v%d', i, j); %记录一下这样一个名字
+                else
+                    mid_vi_vjName = sprintf('mid-v%d-v%d', j, i); %记录一下这样一个名字
+                end
+                xyz = (pf.vertices(viName)+pf.vertices(vjName))./2;
+                xyz = xyz ./ vecnorm(xyz);
+                pf.newVertice(mid_vi_vjName, xyz);  %把新增的顶点 mid_vi_vjName 存入PolyFlag对象。
+                
+                %jk的中点，取名 mid-vj-vk
+                if j&lt;k
+                    mid_vj_vkName = sprintf('mid-v%d-v%d', j, k); %记录一下这样一个名字
+                else
+                    mid_vj_vkName = sprintf('mid-v%d-v%d', k, j); %记录一下这样一个名字
+                end
+                xyz = (pf.vertices(vjName)+pf.vertices(vkName))./2;
+                xyz = xyz ./ vecnorm(xyz);
+                pf.newVertice(mid_vj_vkName, xyz); 
+                
+                %ki的中点，取名 mid-vk-vi
+                if k&lt;i
+                    mid_vk_viName = sprintf('mid-v%d-v%d', k, i); %记录一下这样一个名字
+                else
+                    mid_vk_viName = sprintf('mid-v%d-v%d', i, k); %记录一下这样一个名字
+                end
+                xyz = (pf.vertices(vkName)+pf.vertices(viName))./2;
+                xyz = xyz ./ vecnorm(xyz);
+                pf.newVertice(mid_vk_viName, xyz); 
+                    
+                %附着在原顶点上的3个面，和1个建立在中点上的面。
+                fid_ijk = sprintf('f_on_v%d-v%d-v%d', i,j,k);  %记录‘面f_on_vi-vj-vk’这个名字(j放中间，表示j是原顶点)
+                fid_jki = sprintf('f_on_v%d-v%d-v%d', j,k,i);
+                fid_kij = sprintf('f_on_v%d-v%d-v%d', k,i,j);
+                %fid_inner = sprintf('f%d_inner_v%d-v%d-v%d', i,j,k);
+                fid_inner = sprintf('f%d_inner', i,j,k);
+                
+                    
+                pf.newFlag(fid_ijk, mid_vi_vjName, vjName); %添加三元组：{‘面f’，‘有向边起点顶点’，‘有向边终点顶点’}
+                pf.newFlag(fid_ijk, vjName, mid_vj_vkName);
+                pf.newFlag(fid_ijk, mid_vj_vkName, mid_vi_vjName);
+                 
+                pf.newFlag(fid_jki, mid_vj_vkName, vkName); 
+                pf.newFlag(fid_jki, vkName, mid_vk_viName);
+                pf.newFlag(fid_jki, mid_vk_viName, mid_vj_vkName);
+                
+                pf.newFlag(fid_kij, mid_vk_viName, viName); 
+                pf.newFlag(fid_kij, viName, mid_vi_vjName);
+                pf.newFlag(fid_kij, mid_vi_vjName, mid_vk_viName);
+                
+                pf.newFlag(fid_inner, mid_vj_vkName, mid_vk_viName); 
+                pf.newFlag(fid_inner, mid_vk_viName, mid_vi_vjName);
+                pf.newFlag(fid_inner, mid_vi_vjName, mid_vj_vkName);
+            end
+            p = pf.toPolyhedron(); %由PolyFlag 构建出 Polyhedron对象。
+            p.name = ['u' o.name];
+        end  
+        
+        function p = reflect(o)
+            % 反射，求镜像多面体。
+            p = o;
+            nfaces = numel(o.faces);
+            for f_idx = 1 : nfaces 
+                vvec = o.faces{f_idx}; %vvec是一个数组，代表第f个面的 全部顶点编号。
+                myCell = flip(vvec);
+                o.faces{f_idx} = myCell;   % 反转cell。
+            end
+            p.name = ['r' o.name];
+        end
+    end
+
+    %% Canonical Polyhedra 多面体规范化
+    % [Canonical Polyhedra](https://www.georgehart.com/virtual-polyhedra/canonical.html)
+    methods(Access=private)
+        % 找到各边距离原点O最近的点, 向单位向量移动.
+        function tangentify(o, scale)
+            % 找到边上的距离原点O最近的一个点P, 使得OP向单位向量移动.
+            % A = ( 1 + scale * 0.5 * (1 - dOP) )A ， B = ( 1 + scale * 0.5 * (1 - dOP) )B 
+            % 首先scale是自己指定的0.01，可以控制调节的精细度
+            % 显然，与dOP成负相关，只要dOP小于1,那么就外扩； 要是dOP大于1，那就往内收（单次迭代的变化是很小的）。
+            nfaces = numel(o.faces);
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end);
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    j = vvec(u);
+                    if i &lt; j
+                        A = o.vertices(:,i);
+                        B = o.vertices(:,j);
+                        AB = B - A;        % 线段AB
+                        dAB = vecnorm(AB); % 线段AB的长度
+                        ABu = AB ./ dAB;   % AB方向的单位向量
+                        AO = -A;
+                        % 线段AO在线段AB上的投影长度
+                        dAP = dot(AO, ABu);
+                        % 原点O在线段AB上的投影,   也就是利用 OA+AP 得到 OP。
+                        P = dAP .* ABu + A;
+                        % 线段OP的长度
+                        dOP = vecnorm(P);
+                        factor = scale * 0.5 * (1 - dOP);
+                        dA = factor .* A;
+                        dB = factor .* B;
+                        % if d &gt; 1
+                        %     % 若原点O的投影在线段AB之外, B之外
+                        %     if dAP &gt; dAB
+                        %         dA = factor .* A;
+                        %         A = A + dA; % 减少尖顶
+                        %     % 若原点O的投影在线段AB之外, A之外
+                        %     elseif dAP &lt; 0
+                        %         B = B + dB; % 减少尖顶
+                        %     % 若原点O的投影在线段AB上
+                        %     else
+                        %         A = A + dA;
+                        %         B = B + dB;
+                        %     end
+                        % else
+                        %     % 若原点O的投影在线段AB之外, B之外
+                        %     if dAP &gt; dAB
+                        %         B = B + dB; % 减少尖顶
+                        %     % 若原点O的投影在线段AB之外, A之外
+                        %     elseif dAP &lt; 0
+                        %         A = A + dA; % 减少尖顶
+                        %     % 若原点O的投影在线段AB上
+                        %     else
+                        %         A = A + dA;
+                        %         B = B + dB;
+                        %     end
+                        % end
+                        A = A + dA;
+                        B = B + dB;
+                        o.vertices(:,i) = A;
+                        o.vertices(:,j) = B;
+                        % 移动边的两个端点, 使投影点T更接近于单位向量
+                        % 检查是否更接近于单位向量
+                        % P1 = prj3l(O, [A,B]);
+                        % d1 = vecnorm(P1);
+                        % assert(abs(1-d1) &lt;= abs(1-d));
+                    end
+                    % 下一轮
+                    i = j;
+                end
+            end
+        end
+
+        % 找到各边上距离原点O最近的点（其实就是原点O在这个向量AB的投影点p）, 计算所有投影点的中心, 将其中心平移到原点O.
+        function recenter(o)
+            % 找到各边上距离原点O最近的点（其实就是原点O在这个向量AB的投影点p）, 计算所有投影点的中心, 将其中心平移到原点O.
+            O = [0;0;0];
+            nfaces = numel(o.faces);
+            nverts = size(o.vertices, 2);
+            nedges = nfaces + nverts - 2;   %E = F+V-2
+            P = zeros(3, nedges);
+            e = 0;
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                i = vvec(end);
+                nverts = numel(vvec);
+                for u = 1 : nverts
+                    j = vvec(u);
+                    if i &lt; j
+                        e = e + 1;
+                        assert(e &lt;= nedges);
+                        A = o.vertices(:,i);
+                        B = o.vertices(:,j);
+                        % 原点O在线段AB上的投影
+                        p = prj3l(O, [A,B]);
+                        P(:,e) = p;
+                    end
+                    % 下一轮
+                    i = j;
+                end
+            end
+            % 所有投影点的中心c
+            c = mean(P, 2);
+            % c平移到原点O
+            o.vertices = o.vertices - c;
+        end
+
+        function planarize(o, scale)
+            % 顶点坐标将动态改变, 故不能用centers()事先确定各面中心.那就每次用mean(V,2)
+            % 因为这时候，一个face的所有点 未必在一个平面,经过此函数可以变换在同一个平面。
+            nfaces = numel(o.faces);
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                nverts = numel(vvec);
+                V = o.vertices(:,vvec); % 各顶点坐标
+                c = mean(V, 2);         % 面的中心
+                cV = V - c;             % 中心到各顶点的向量: (c,v)
+                N = zeros(3, nverts);   % 每个角（相邻三顶点构成的面）的法向量
+                i = vvec(end-1);
+                j = vvec(end);          %每次三个点构成一个平面。 
+                for u = 1 : nverts
+                    k = vvec(u);
+                    A = o.vertices(:,i);
+                    B = o.vertices(:,j);
+                    C = o.vertices(:,k); %k点是当前顶点。 A、B是前面的连续的两个顶点。
+                    BA = A - B;
+                    BC = C - B;
+                    n = cross(BC, BA);   % 顶点j对应的角的法向量(指向多面体内部)
+                    % n = o.unit(n);     % 归一化
+                    N(:,u) = n;          %比如这个面有5个顶点，那么就有5个法向量。这5个法向量，未必平行。
+                    % 下一轮
+                    i = j;
+                    j = k;
+                end
+                n = o.unit(mean(N, 2));     % 求出平均的法向量, 做单位化（归一化）。 那就是 依据这个法向量，作为这个面的 最终的法向量。
+                N = repmat(n, [1,nverts]);  % 重复排列这个n。
+                P = dot(cV, N);             % (c,v)在法向量上的投影长度
+                V1 = V - scale * P .* n;    % 平面化
+                o.vertices(:,vvec) = V1;    % 平面化完成以后。存入vertices。
+                % err = mean(abs(P));
+                % P1 = dot(V1-c, N);
+                % err1 = mean(abs(P1));
+                % assert(err1 &lt;= err || err1 &lt; 1e-7);
+            end
+        end
+    end
+
+    methods
+        % 将多面体缩放于单位球内.
+        function rescale(o)
+            D = vecnorm(o.vertices);
+            d = max(D);
+            o.vertices = o.vertices ./ d;
+        end
+
+        %迭代次数
+        function p = canonize(o, nMaxIt, scale)
+            for it = 1 : nMaxIt
+                p = o.clone();       % 构造对象并且拷贝数据成员。只有一个默认参数o，于是调用的时候不用写参数。
+                p.tangentify(scale); % 找到各边上距离原点O最近的点（其实就是原点O在这个向量AB的投影点p）, 向单位向量移动.
+                p.recenter();        % 找到各边上距离原点O最近的点（其实就是原点O在这个向量AB的投影点p）, 计算所有投影点的中心, 将其中心平移到原点O.
+                p.planarize(scale);  % 一个face的所有点 未必在一个平面,经过此函数可以变换在同一个平面。
+                e = max(vecnorm(o.vertices - p.vertices));
+                if e &lt; 1e-5
+                    break;
+                end
+                o = p;
+            end
+            p.name = ['C' o.name];
+        end
+    end
+
+    methods(Static)
+        function Y = unit(X)
+            Y = X ./ vecnorm(X);
+        end
+
+        % 从A到B, 比例t的位置
+        function Y = ratio(A, B, t)
+            Y = (1-t).*A + t.*B;
+        end
+
+        % 从A到B, 1/3的位置
+        function Y = oneThird(A, B)
+            Y = A + (B - A) ./ 3; % Y = ratio(A, B, 1/3);
+        end
+
+        % 二分法求解 f(x) = 0
+        % @param[in] f  单调增函数
+        function x = newton(f, lb, ub)
+            assert(lb &lt; ub);
+            y0 = f(lb);
+            y1 = f(ub);
+            assert(y0 &lt;= 0);
+            assert(0 &lt;= y1);
+            while (ub-lb) &gt; 1e-6
+                c = (lb + ub) / 2;
+                y1 = f(c);
+                if y1 &lt;= 0
+                    lb = c;
+                else
+                    ub = c;
+                end
+            end
+            x = c;
+        end
+
+        function s = midName(i, j)
+            if i &lt; j
+                s = sprintf('v%d-v%d', i, j);
+            else
+                s = sprintf('v%d-v%d', j, i);
+            end
+        end
+    end
+
+    %% 多面体绘图
+    methods
+        % 绘制多面体
+        function fig = patch(o, name)
+            % 输入名字，输出一个MlcFigure类对象
+            if nargin &lt; 2
+                name = o.name;
+                if ~name
+                    name = '';
+                end
+            end
+            V = o.vertices.';  %共轭转置是一个撇，这里是点撇，那就是单纯的转置。
+            nfaces = numel(o.faces);
+            % cellfun 对元胞数组中的每个元胞应用函数
+            % nMaxVerts指的是各个面中，顶点数最多的值。
+            nMaxVerts = max(cellfun(@numel, o.faces));
+            F = nan(nfaces, nMaxVerts); %创建所有值均为 NaN 的数组。注意第二个维度，是各个面最大的顶点数。
+            for f = 1 : nfaces
+                vvec = o.faces{f};
+                nverts = numel(vvec);
+                F(f, 1:nverts) = vvec;  %刚好填满的行不会有NAN，但有些面，其顶点数目并不是最大顶点数，还是会有NAN。
+            end
+            fig = MlcFigure(name);
+            fig.FixAspectRatio(1);
+            MLC = [0 0 0];
+            fig.Patch(MLC, 'Vertices', V, 'Faces', F, 'FaceColor', 'r', 'FaceAlpha', 0.2);
+            fig.View3(-45, 15);
+            xlabel('X');
+            ylabel('Y');
+            zlabel('Z');
+            str = sprintf('%s, V%d,E%d,F%d',GPolyhedron.removeCExceptLast(o.name),size(o.vertices,2),size(o.vertices,2)+size(o.faces,2)-2,size(o.faces,2));
+            title(str);%打上title
+        end
+    end
+
+    %% 五种柏拉图多面体
+    methods(Static)
+        function o = Tetrahedron()
+            SQRT2   = sqrt(2);
+            SQRT3   = sqrt(3);
+            TETRA_Q = SQRT2 / 3;
+            TETRA_R = 1.0 / 3;
+            TETRA_S = SQRT2 / SQRT3;
+            TETRA_T = 2 * SQRT2 / 3;
+            V = [ -TETRA_S, -TETRA_Q, -TETRA_R;
+                   TETRA_S, -TETRA_Q, -TETRA_R;
+                         0,  TETRA_T, -TETRA_R;
+                         0,        0,        1; ]';
+            V = V ./ vecnorm(V); % 顶点在单位球面上
+            % 4个面, 每面3边, 每边2个顶点
+            F = { [ 1 3 2 ];
+                  [ 2 4 1 ];
+                  [ 3 4 2 ];
+                  [ 4 3 1 ]; };
+            o = Polyhedron(V, F);
+            o.sortVertices();
+            o.name = 'T';
+        end
+
+        function o = Cube()
+            V = [ 1  1  1;  % 1
+                 -1  1  1;  % 2
+                 -1 -1  1;  % 3
+                  1 -1  1;  % 4
+                 -1 -1 -1;  % 5
+                  1 -1 -1;  % 6
+                  1  1 -1;  % 7
+                 -1  1 -1;  % 8
+                ]';
+            V = V ./ vecnorm(V); % 顶点在单位球面上
+            % 6个面, 每面4边, 每边2个顶点
+            F = { [ 1 2 3 4 ];
+                  [ 8 7 6 5 ];
+                  [ 1 4 6 7 ];
+                  [ 8 5 3 2 ];
+                  [ 2 1 7 8 ];
+                  [ 3 5 6 4 ]; };
+            o = Polyhedron(V, F);
+            o.sortVertices();
+            o.name = 'C';
+        end
+
+        function o = Octahedron()
+            V = [ 0,  0,  1;
+                  1,  0,  0;
+                  0, -1,  0;
+                 -1,  0,  0;
+                  0,  1,  0;
+                  0,  0, -1; ]';
+            V = V ./ vecnorm(V); % 顶点在单位球面上
+            % 4个面, 每面3边, 每边2个顶点
+            F = { [ 1 3 2 ];
+                  [ 1 4 3 ];
+                  [ 1 5 4 ];
+                  [ 1 2 5 ];
+                  [ 6 2 3 ];
+                  [ 6 3 4 ];
+                  [ 6 4 5 ];
+                  [ 6 5 2 ]; };
+            o = Polyhedron(V, F);
+            o.sortVertices();
+            o.name = 'O';
+        end
+
+        function o = Dodecahedron()
+            SQRT5   = sqrt(5);
+            GOLDEN  = (SQRT5 + 1) / 2;
+            RGOLDEN = 1 / GOLDEN;
+            V = [       1,        1,        1;
+                        1,       -1,        1;
+                       -1,       -1,        1;
+                       -1,        1,        1;
+                       -1,        1,       -1;
+                        1,        1,       -1;
+                        1,       -1,       -1;
+                       -1,       -1,       -1;
+                   GOLDEN,  RGOLDEN,        0;
+                   GOLDEN, -RGOLDEN,        0;
+                  -GOLDEN,  RGOLDEN,        0;
+                  -GOLDEN, -RGOLDEN,        0;
+                  RGOLDEN,        0,   GOLDEN;
+                  RGOLDEN,        0,  -GOLDEN;
+                 -RGOLDEN,        0,   GOLDEN;
+                 -RGOLDEN,        0,  -GOLDEN;
+                        0,   GOLDEN,  RGOLDEN;
+                        0,   GOLDEN, -RGOLDEN;
+                        0,  -GOLDEN,  RGOLDEN;
+                        0,  -GOLDEN, -RGOLDEN; ]';
+            V = V ./ vecnorm(V); % vecnorm(V)就是2-范数。 顶点在单位球面上
+            % 12个面, 每面5边, 每边2个顶点
+            %这个F其实就是 每一行是正五边形的五个顶点编号。
+            F = { [ 1  9  6 18 17 ];
+                  [ 1 17  4 15 13 ];
+                  [ 1 13  2 10  9 ];
+                  [ 2 13 15  3 19 ];
+                  [ 2 19 20  7 10 ];
+                  [ 3 15  4 11 12 ];
+                  [ 3 12  8 20 19 ];
+                  [ 4 17 18  5 11 ];
+                  [ 5 18  6 14 16 ];
+                  [ 6  9 10  7 14 ];
+                  [ 7 20  8 16 14 ];
+                  [ 8 12 11  5 16 ]; };
+            o = Polyhedron(V, F);
+            o.sortVertices();
+            o.name = 'D';
+        end
+
+        function o = Icosahedron()
+            SQRT5  = sqrt(5);
+            GOLDEN = (SQRT5 + 1) / 2;
+            V = [       1,  GOLDEN,       0;
+                        1, -GOLDEN,       0;
+                       -1, -GOLDEN,       0;
+                       -1,  GOLDEN,       0;
+                   GOLDEN,       0,       1;
+                  -GOLDEN,       0,       1;
+                  -GOLDEN,       0,      -1;
+                   GOLDEN,       0,      -1;
+                        0,       1,  GOLDEN;
+                        0,       1, -GOLDEN;
+                        0,      -1, -GOLDEN;
+                        0,      -1,  GOLDEN; ]';
+            V = V ./ vecnorm(V); % 顶点在单位球面上
+            % 20个面, 每面3边, 每边2个顶点
+            F = { [ 1  5   8 ],...
+                  [ 1  9   5 ],...
+                  [ 1  4   9 ],...
+                  [ 1 10   4 ],...
+                  [ 1  8  10 ],...
+                  [ 2  8   5 ],...
+                  [ 2  5  12 ],...
+                  [ 2 12   3 ],...
+                  [ 2  3  11 ],...
+                  [ 2 11   8 ],...
+                  [ 3 12   6 ],...
+                  [ 3  6   7 ],...
+                  [ 3  7  11 ],...
+                  [ 4 10   7 ],...
+                  [ 4  7   6 ],...
+                  [ 4  6   9 ],...
+                  [ 5  9  12 ],...
+                  [ 6 12   9 ],...
+                  [ 7 10  11 ],...
+                  [ 8 11  10 ] };
+            o = Polyhedron(V, F);
+            o.sortVertices();
+            o.name = 'I';
+        end
+    end
+end
+</pre>
+
+</body>
+</html>

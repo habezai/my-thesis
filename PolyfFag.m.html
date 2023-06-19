@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html>
+<head>
+<link rel="Stylesheet" type="text/css" href="style.css">
+<link rel="alternate" type="application/rss+xml" title="RSS" href="rss.xml">
+<title>PolyfFag.m</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+
+<pre matlab>
+classdef PolyFlag &lt; handle
+    % polyflag 构造多面体
+    
+    properties
+        % 三元组, (面ID, 顶点ID_1, 顶点ID_2)
+        % 以面的内法向量(从多面体外部指向内部)为轴, 顶点依右手系排序,
+        % 顶点1与顶点2为相邻顶点.
+        % 两级映射: 面ID -&gt; 映射(顶点ID_1 -&gt; 顶点ID_2)
+        % flags(faceName): 面fid的顶点映射（面fid上的一个map）
+        % flags(faceName)(vertName): 面fid上, 顶点vertName的相邻顶点编号(下一个顶点)
+        % faceName: 字符串
+        % vertName: 字符串
+        % flags(faceName)(vertName1)=vertName2。  faceName-&gt;(vertName1-&gt;vertName2)
+        flags
+
+        % 顶点坐标
+        % 映射: vertices[vertName] == [x;y;z]           vertName -&gt; [x;y;z] 
+        vertices
+
+        % 顶点编号
+        % 映射: vertidxs[vertName] == 正整数编号        vertName -&gt; 正整数编号   
+        vertidxs
+    end
+
+    methods
+        % 构造函数
+        function o = PolyFlag(flags, vertices, vertidxs)
+             if nargin == 0  %（默认构造）
+                o.flags = containers.Map();  % 使用matlab中的map数据结构进行初始化。
+                o.vertices = containers.Map();
+                o.vertidxs = containers.Map();
+             else            %（拷贝构造）
+                o.flags = flags;
+                o.vertices = vertices; % vertName -&gt; xyz
+                o.vertidxs = vertidxs; % vertName -&gt; i
+             end
+        end
+        function Construct(o,p)
+            % 输入一个多面体对象，构造PolyFlag对象
+            nverts = size(p.vertices, 2);    %整个多面体顶点总数
+            for i = 1 : nverts
+                vertName = sprintf('v%d', i); %为每一个顶点起名字vi，准备存入PolyFlag对象
+                %顶点坐标
+                xyz = p.vertices(:,i);
+                o.newVertice(vertName, xyz); %把每一个原始顶点，用于初始化PolyFlag对象
+                %以 顶点名字---&gt; (x坐标;y坐标;z坐标) 的映射形式，存入 pf.vertices
+            end
+            nfaces = numel(p.faces);       %面数
+            for f = 1 : nfaces
+                faceName_f = sprintf('f%d', f);
+                vvec = p.faces{f};         %vvec是一个数组，代表第f个面的 全部顶点编号。
+                i = vvec(end);             %第f个面的，最后一个顶点的的顶点编号。
+                vertName_i = sprintf('v%d', i);  %记录一下最后一个顶点名字 ‘顶点i’
+
+                nverts = numel(vvec);      %单个面上的 顶点总数
+                for u = 1 : nverts
+                    j = vvec(u);                %从前往后，遍历顶点编号j。
+                    vertName_j = sprintf('v%d', j);  %记录顶点名字 ‘顶点j’
+                    o.newFlag(faceName_f, vertName_i, vertName_j); %添加三元组：{‘面f’，'顶点i’，‘顶点j’}
+                    i = j;  %这样迭代 比较巧妙的是， i和j是一个数对，循环右移，刚好 nverts 次移动就完成了所有边的连接。
+                    vertName_i = sprintf('v%d', i); 
+                end
+            end
+        end
+        
+        % 添加顶点坐标, 分配顶点编号(按照添加进来的顺序排编号); 或更新顶点坐标
+        % @param[in] vertName  顶点ID, 字符串
+        function newVertice(o, vertName, coordinates)
+            % 添加或更新 o.vertices(vertName) 为 3x1的 coordinates
+            if ~isKey(o.vertices, vertName)              % o.vertices(vertName)不存在的时候，就添加顶点，分配编号。
+                o.vertices(vertName) = coordinates(:);   % o.vertidxs[vertName] -&gt; [x;y;z]写入坐标
+                o.vertidxs(vertName) = o.vertices.Count; % o.vertidxs[vertName] -&gt; 正整数编号，写入编号
+            else
+                o.vertices(vertName) = coordinates;      % o.vertices(vertName)存在的时候，就修改坐标。
+            end
+        end
+        
+        % 为面faceName 添加或修改顶点
+        % @param[in] faceName   面ID, 字符串
+        % @param[in] vertName1  顶点ID, 字符串
+        % @param[in] vertName2  顶点ID, 字符串
+        function newFlag(o, faceName, vertName1, vertName2)
+            % 添加或修改 o.flags[faceName] 为 vmap， 其中vmap[vertName1] = vertName2; 
+            if isKey(o.flags, faceName)  %如果o.flags(faceName)存在,
+                vmap = o.flags(faceName);       %用vmap引用它。或者说，是别名。
+                vmap(vertName1) = vertName2;    % vertName1 -&gt; vertName2, 修改vertName1的相邻顶点为vertName2。
+            else
+                vmap = containers.Map(); %如果o.flags(faceName)不存在，那就新建一个(点1,点2)的map数据结构vmap。
+                vmap(vertName1) = vertName2;    %vertName1 -&gt; vertName2s, vertName1的相邻顶点为vertName2
+                o.flags(faceName) = vmap;       %初始化vmap以后，创建o.flags(faceName)，并以vmap赋值。
+            end
+        end
+
+        % 画出多面体
+        function patch(o)
+            %这个暂时好像没调用到。
+            nfaces = o.flags.Count; % 面的总数
+            fNames = o.flags.keys;    % fid列表
+            nMaxVerts = 0;          % 面的顶点数量的最大值
+            for f = 1 : nfaces
+                faceName = fNames{f};
+                vmap = o.flags(faceName);
+                if nMaxVerts &lt; vmap.Count % 面fid的顶点数量
+                    nMaxVerts = vmap.Count;
+                end
+            end
+            % F: 每行对应1个面, 表示围成该面的顶点的编号序列,
+            %    要求闭合, 即最末顶点与首个顶点编号相同
+            %    有k个顶点, 则需要k+1个顶点编号, 多余元素用NaN
+            % F的列数: 面的顶点数量的最大值nMaxVerts+1
+            F = nan(nMaxVerts+1,nfaces);
+            for f = 1 : nfaces
+                faceName = fNames{f};
+                vmap = o.flags(faceName);
+                nverts = vmap.Count;   % 面fid的顶点数量
+                vNames = vmap.keys;    % 面fid的顶点ID列表
+                vertName = vNames{1};
+                for u = 1 : nverts
+                    F(u,f) = o.vertidxs(vertName); % vertName -&gt; i
+                    vertName = vmap(vertName); % 相邻的下一个顶点ID
+                end
+                F(nverts+1,f) = F(1,f); % 闭合 (末顶点=首顶点)
+            end
+            nverts = o.vertidxs.Count;  % 顶点的总数
+            % V: [*,3], 每列对应1个顶点, 表示该顶点的坐标
+            V = zeros(3, nverts);
+            vNames = o.vertidxs.keys;
+            for u = 1 : nverts
+                vertName = vNames{u};
+                i = o.vertidxs(vertName);      % 顶点vertName的正整数编号i
+                V(:,i) = o.vertices(vertName); % 顶点i的坐标
+            end
+            fig = MlcFigure('poly.faces');
+            fig.FixAspectRatio(1);
+            MLC = [0, 0, 1];
+            fig.Patch(MLC, 'Faces', F', 'Vertices', V', ...
+                      'FaceColor', 'r' ,'FaceAlpha', 0.5);
+            view(3); %设置视角
+            % light('Posi',[100 100 100]);
+            % lightangle(30,30);%建立光源并设置光源视角
+            % lighting flat; %设置光照模式
+            material metal; %设置面的反射属性
+            xlabel('X');
+            ylabel('Y');
+            zlabel('Z'); %为坐标轴加标签
+            grid on;
+            % axis off %关闭坐标轴 
+        end
+
+        % @param[in] c  多面体的中心
+        function sortVertAboutNorm(o, c, faceName)
+            vmap = o.flags(faceName);
+            nverts = vmap.Count;
+            vNames = vmap.keys;
+            V = zeros(3, nverts);
+            for u = 1 : nverts
+                vertName = vNames{u};
+                xyz = o.vertices(vertName);
+                V(:,u) = xyz;
+            end
+            % 面的中心
+            m = mean(V, 2);
+            % 将面的中心平移到原点O
+            V = V - m;
+            % 多面体的中心为c, 面的中心为m, 向量(m,c)指向多面体内部
+            mc = c - m;
+            % 向量(m,c)垂直于面的分量(减去其在面上的投影)即为法向量
+            AB = V(:,1:2); % OAB这3个点在面上
+            n = mc - prj3p(mc, AB);
+            % 面的法向量旋转到Z轴，即面旋转到XY平面上
+            V = rotg3vz(n) * V;
+            [X,Y,~] = mxsplit(V, 2); % X = V(1,:); Y = V(2,:);
+            % 顶点在XY平面上对应的幅度角(弧度)
+            A = atan2(Y,X);
+            % 顶点依A排序
+            [~,I] = sort(A);
+            % 闭合顶点序列
+            I = [I I(1)];
+            % 重建顶点顺序映射
+            vmap = containers.Map();
+            for u = 1 : nverts
+                i = I(u);
+                j = I(u+1);
+                vertName1 = vNames{i};
+                vertName2 = vNames{j};
+                vmap(vertName1) = vertName2;
+            end
+            o.flags(faceName) = vmap;
+        end
+
+        % 使所有面的顶点依法向量右手系排列
+        function sortVerts(o)
+            % 多面体的中心为c
+            V = cell2mat(o.vertices.values);
+            c = mean(V, 2);
+            fNames = o.flags.keys;
+            nfaces = o.flags.Count;
+            for i = 1 : nfaces
+                faceName = fNames{i};
+                o.sortVertAboutNorm(c, faceName);
+            end
+        end
+
+        function p = toPolyhedron(o)
+            %根据PolyFlag，构造Polyhedron,并初始化p.vertices和p.faces成员。(p.name在外面赋值)
+            p = Polyhedron();
+            nverts = o.vertidxs.Count;  % 顶点的总数
+            % [3,*], 每列对应1个顶点, 表示该顶点的坐标
+            p.vertices = zeros(3, nverts);
+            vNames = o.vertidxs.keys;
+            for u = 1 : nverts
+                vertName = vNames{u};
+                i = o.vertidxs(vertName);      % 顶点vertName的正整数编号i
+                p.vertices(:,i) = o.vertices(vertName); % 顶点i的坐标
+            end
+            nfaces = o.flags.Count; % 面的总数
+            fNames = o.flags.keys;    % fid列表
+            % {1,*}, 每个元素对应1个面, 表示围成该面的顶点的编号序列, 不闭合
+            p.faces = cell(1,nfaces);  %1行，o.flags.Count列，也就是横着一排cell。每个cell里一个数组，表示一个面的所有顶点编号。
+            for f = 1 : nfaces
+                faceName = fNames{f};
+                vmap = o.flags(faceName);
+                nverts = vmap.Count; % 面fid的顶点数量
+                vvec = zeros(nverts,1);
+                vNames = vmap.keys;    % 面fid的顶点ID列表
+                vertName = vNames{1};
+                for u = 1 : nverts
+                    i = o.vertidxs(vertName); % vertName -&gt; i
+                    vvec(u) = i;
+                    vertName = vmap(vertName);     % 相邻的下一个顶点ID
+                end
+                p.faces{f} = vvec;
+            end
+        end
+
+        % 求出最小圆半径
+        function radius = mindis(obj,lowerbound,upperbound)
+            % 求出最小圆半径
+            % 球心坐标
+            if nargin &lt; 3        %（默认0下界,1上界）
+                lowerbound = 0;
+                upperbound = 1;              
+            end
+            numV = obj.vertices.Count;
+            verts_all = zeros(3,numV);
+            all_verts = values(obj.vertices);
+            for i=1:numV
+                verts_all(:,i) = all_verts{1,i};
+            end
+            center = mean(verts_all,2);
+            
+            %以两个邻点距离为半径第一次计算
+            radius1 = lowerbound;
+            radius2 = upperbound;
+            radius = 0;
+            
+            face_1 = obj.flags('f1');
+            vertsOnFace = face_1.keys();%取出keys的cell列表。
+            oneVertName = vertsOnFace{1};        OA = obj.vertices(oneVertName)-center;
+            nextVertName = face_1(oneVertName);  OB= obj.vertices(nextVertName)-center;
+            sigma = acos(dot(OA,OB)/(norm(OA).*norm(OB)));  %求两个线的夹角
+            AB = OB-OA;
+            d = vecnorm(AB);  %直接以某个边长作为尝试。
+            % radius = d;
+            
+%             for i=1:obj.flags.Count
+%                 faceName = strcat('f',num2str(i));
+%                 face = obj.flags(faceName);
+%                 vertNameCell = face.keys;
+%                 numVerts = size(vertNameCell,2);
+%                 for j = 1:numVerts
+%                     vertName1=vertNameCell{j};
+%                     vertName2=face(vertName1);
+%                     %每一个面的边长。取大的更新右边界。
+%                     vert1 = obj.vertices(vertName1);
+%                     vert2 = obj.vertices(vertName2);
+%                     if(norm(vert2-vert1)&gt;radius2)
+%                         radius2 = norm(vert2-vert1);      %右边界
+%                     end
+%                 end   
+%             end
+            
+            %每个点（先计算第一个点）           
+            vert1 = verts_all(:,1);
+            rvte = 0;%两个圆重复角度
+            while(1)
+                rvte = 0;%两个圆重复角度
+                radius = (radius1+radius2)/2;
+                disp(['Radius:' num2str(radius)]) %hyf
+                for i=1:length(obj.vertices)
+                    if mod(i,1000)==0  %hyf
+                        disp(['now i is :' num2str(i)])
+                    end
+                    curVert = verts_all(:,i);
+                    theta = acos(dot(vert1-center,curVert-center)/(norm(vert1-center).*norm(curVert-center)));
+                    if theta&gt;(pi/2)  || theta &gt;(3*sigma)
+                        continue;   %成的角度 超过90度是钝角的直接跳过。  超过3sigma的也跳过。
+                    end
+                    if  ( norm(vert1-curVert) &gt;0 ) % &amp;&amp; (norm(vert1-curVert)&lt;=upper_bound) )   %俩顶点，也就是俩波束中心距离太远的直接排除。
+                        a1=vert1(1,1);b1=vert1(2,1);c1=vert1(3,1);      r1=radius;n1=vert1 - center;%给出要验证的圆的参数
+                        a2=curVert(1,1);b2=curVert(2,1);c2=curVert(3,1);r2=radius;n2=curVert-center;%给出对比圆的参数
+                        syms x y z real
+  %                     eqns = [(x-a1)^2+(y-b1)^2+(z-c1)^2==r1^2,(x-a2)^2+(y-b2)^2+(z-c2)^2==r2^2];%得到交点的解析解
+                        %一个球  和 一个圆的交集。
+                        eqns = [(x-a1)^2+(y-b1)^2+(z-c1)^2==r1^2,(x-a2)^2+(y-b2)^2+(z-c2)^2==r2^2,dot([x-a2,y-b2,z-c2],n2)==0];%得到交点的解析解
+                        vars = [x y z];
+                        [x,y,z] = solve(eqns,vars);
+                        x = eval(x);y=eval(y);z=eval(z); 
+                        if length(x)==2 &amp;&amp; (all(~isnan(x))) %如果交点有两个。
+                            % len是俩交点的距离。
+                            len = norm([x(1,1)-x(2,1),y(1,1)-y(2,1),z(1,1)-z(2,1)]);
+                            rvte=(2*asin(len/(2*radius)))+rvte;
+                            disp(['rvte is:' num2str(rvte)])
+                            if rvte &gt; 2*pi+0.1
+                                radius2 = radius;
+                                break;
+                            end
+                        end
+                    end
+                end
+                if rvte &lt; 2*pi-0.001
+                    radius1 = radius;
+                elseif rvte &gt; 2*pi+0.1
+                    radius2 = radius;
+                else
+                    break;
+                end          
+            end
+            str = sprintf('结果区间为:%f,%f,结果为:%f',radius1,radius2,radius )
+        end
+
+        %连线
+        function obj = lines(obj)
+            %球心坐标
+            all_verts = values(obj.vertices);
+            numV = obj.vertices.Count;
+            verts_all = zeros(3,numV);
+            for i=1:numV
+                verts_all(:,i) = all_verts{1,i};
+            end
+            center = mean(verts_all,2);
+            
+            for i=1:length(obj.vertices)
+                curVert = verts_all(:,i);
+                x1=[0,0];
+                y1=[0,0];
+                z1=[0,0];
+                x1(1,1)=curVert(1,1);
+                x1(1,2)=center(1,1);
+                y1(1,1)=curVert(2,1);
+                y1(1,2)=center(2,1);
+                z1(1,1)=curVert(3,1);
+                z1(1,2)=center(3,1);
+                plot3(x1,y1,z1,'o','Color','blue','MarkerSize',1)
+                hold on
+                p=plot3(x1,y1,z1,'Color','blue');
+                p.LineWidth = 0.1;
+                axis equal;%设置坐标轴显示方式
+                hold on;
+                grid on;
+            end
+        end
+    end
+
+    methods(Static)
+        function o = fromVF(V, F)
+            %通过 顶点们V,面们F。构造PolyFlag对象。
+            o = PolyFlag();
+            nverts = size(V, 2);
+            for u = 1 : nverts
+                vertName = sprintf('v%d', u);
+                o.vertidxs(vertName) = u;
+                o.vertices(vertName) = V(:,u);
+            end
+            nfaces = size(F, 2);
+            for f = 1 : nfaces
+                faceName = sprintf('f%d', f);
+                vmap = containers.Map();
+                vvec = F(:,f);
+                nverts = nnz(~isnan(vvec));
+                vvec = [vvec(1:nverts); vvec(1)]; % 闭合
+                for u = 1 : nverts
+                    vertName1 = sprintf('v%d', vvec(u));
+                    vertName2 = sprintf('v%d', vvec(u+1));
+                    vmap(vertName1) = vertName2;
+                end
+                o.flags(faceName) = vmap;
+            end
+            o.sortVerts(); % 各面顶点依法向量排序
+        end
+
+        function o = Icosahedron()
+            SQRT5  = sqrt(5);
+            GOLDEN = (SQRT5 + 1) / 2;
+            V = [       1,  GOLDEN,       0;
+                        1, -GOLDEN,       0;
+                       -1, -GOLDEN,       0;
+                       -1,  GOLDEN,       0;
+                   GOLDEN,       0,       1;
+                  -GOLDEN,       0,       1;
+                  -GOLDEN,       0,      -1;
+                   GOLDEN,       0,      -1;
+                        0,       1,  GOLDEN;
+                        0,       1, -GOLDEN;
+                        0,      -1, -GOLDEN;
+                        0,      -1,  GOLDEN; ]';
+            V = V ./ vecnorm(V); % 顶点在单位球面上
+            % 20个面, 每面3边, 每边2个顶点
+            F = [ 1  5   8;
+                  1  9   5;
+                  1  4   9;
+                  1 10   4;
+                  1  8  10;
+                  2  8   5;
+                  2  5  12;
+                  2 12   3;
+                  2  3  11;
+                  2 11   8;
+                  3 12   6;
+                  3  6   7;
+                  3  7  11;
+                  4 10   7;
+                  4  7   6;
+                  4  6   9;
+                  5  9  12;
+                  6 12   9;
+                  7 10  11;
+                  8 11  10; ]';
+            o = PolyFlag.fromVF(V, F);
+        end
+
+        function testIcosahedron()
+            pf = PolyFlag.Icosahedron();
+            pf.plot();
+        end
+
+        function o = Dodecahedron()
+                        SQRT5   = sqrt(5);
+            GOLDEN  = (SQRT5 + 1) / 2;
+            RGOLDEN = 1 / GOLDEN;
+            V = [       1,        1,        1;
+                        1,       -1,        1;
+                       -1,       -1,        1;
+                       -1,        1,        1;
+                       -1,        1,       -1;
+                        1,        1,       -1;
+                        1,       -1,       -1;
+                       -1,       -1,       -1;
+                   GOLDEN,  RGOLDEN,        0;
+                   GOLDEN, -RGOLDEN,        0;
+                  -GOLDEN,  RGOLDEN,        0;
+                  -GOLDEN, -RGOLDEN,        0;
+                  RGOLDEN,        0,   GOLDEN;
+                  RGOLDEN,        0,  -GOLDEN;
+                 -RGOLDEN,        0,   GOLDEN;
+                 -RGOLDEN,        0,  -GOLDEN;
+                        0,   GOLDEN,  RGOLDEN;
+                        0,   GOLDEN, -RGOLDEN;
+                        0,  -GOLDEN,  RGOLDEN;
+                        0,  -GOLDEN, -RGOLDEN; ]';
+            V = V ./ vecnorm(V); % 顶点在单位球面上
+            % 12个面, 每面5边, 每边2个顶点
+            F = [  1  9  6 18 17;
+                   1 17  4 15 13;
+                   1 13  2 10  9;
+                   2 13 15  3 19;
+                   2 19 20  7 10;
+                   3 15  4 11 12;
+                   3 12  8 20 19;
+                   4 17 18  5 11;
+                   5 18  6 14 16;
+                   6  9 10  7 14;
+                   7 20  8 16 14;
+                   8 12 11  5 16; ]';
+            o = PolyFlag.fromVF(V, F);
+        end
+
+        function testDodecahedron()
+            pf = PolyFlag.Dodecahedron();
+            pf.plot();
+        end
+
+        function testToPolyhedron()
+            pf = PolyFlag.Dodecahedron();
+            p = pf.toPolyhedron();
+        end
+    end
+end
+</pre>
+
+</body>
+</html>

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<link rel="Stylesheet" type="text/css" href="style.css">
+<link rel="alternate" type="application/rss+xml" title="RSS" href="rss.xml">
+<title>节点为单个邻居关系生成ambiguity个半盲扇区(从几千个模型扇区中选出ambiguity个模糊扇区)的代码</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+
+<div id="本功能的实现代码："><h2 id="本功能的实现代码：" class="header"><a href="#本功能的实现代码：">本功能的实现代码：</a></h2></div>
+<pre matlab>
+        function sectorIds = CalcSectorIds(o, vec, r)
+        % 传入 方位向量vec和数字r，计算出最靠近vec方向的r个扇区的扇区id们sectorIds。 r是半盲模糊度。
+        % 这个函数能让一个向量（加上 一组扇区顶点），映射出一组扇区id编号。收录 最靠近vec的r个扇区的id。
+            D = vec' * o.V;  %令{ D = vec转置 * 矩阵V }，结果应该是个行向量，元素是向量内积。
+            [~, I] = sort(D, 'descend');%降序排序，索引存进I。I 是 1xnumSectors大小的数组。
+            sectorIds = I(1:r);% 截取前面r个元素。扇区id 编号最大是numSectors(几千)，最小是1。（并非从1到M）。
+</pre>
+<div id="代码全文："><h2 id="代码全文：" class="header"><a href="#代码全文：">代码全文：</a></h2></div>
+<pre matlab>
+classdef SectorModel &lt; handle
+    properties
+        numSectors %扇区数量, 指的是 单位球面的全部方位 所有的扇区数
+
+        % 全部扇区顶点坐标 矩阵（每个列向量是一个扇区顶点的3维坐标，是单位列向量）
+        % double, [3, numSectors]
+        V
+
+        % 扇区半锥顶角（角度）ψ=2.5度
+        psi
+    end
+
+    methods
+        function o = SectorModel(V, psi)
+            o.numSectors = size(V, 2);%第二个维度的长度。(列数)
+            o.V = V;%矩阵V，每个列向量是一个扇区顶点的坐标。
+            o.psi = psi;
+        end
+
+        % @param[in] vec  The vector from one node to the other, [3,1].
+        % @param[in] r    The number of sectors.
+        %
+        % The function finds `r` sectors that spans the minimum angels with
+        % the vector.
+        function sectorIds = CalcSectorIds(o, vec, r)
+        % 传入 方位向量vec和数字r，计算出最靠近vec方向的r个扇区的扇区id们sectorIds。 r是半盲模糊度。
+        % 这个函数能让一个向量（加上 一组扇区顶点），映射出一组扇区id编号。收录 最靠近vec的r个扇区的id。
+            D = vec' * o.V;  %令{ D = vec转置 * 矩阵V }，结果应该是个行向量，元素是向量内积。
+            [~, I] = sort(D, 'descend');%降序排序，索引存进I。I 是 1xnumSectors大小的数组。
+            sectorIds = I(1:r);% 截取前面r个元素。扇区id 编号最大是numSectors(几千)，最小是1。（并非从1到M）。
+        end 
+    end
+end
+</pre>
+
+</body>
+</html>
